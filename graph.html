@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Graph Example</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <canvas id="myChart" width="400" height="200"></canvas>
+
+    <script>
+        // Sample Data for the Graph
+        const data = {
+            labels: ['Correct Questions', 'Incorrect Questions', 'Unattempted Questions'],
+            datasets: [{
+                label: 'Question Summary',
+                data: [15, 8, 12], // Example values: Correct=15, Incorrect=8, Unattempted=12
+                backgroundColor: ['#4caf50', '#f44336', '#ff9800'], // Colors for bars
+            }]
+        };
+
+        // Configuration for the Graph
+        const config = {
+            type: 'bar',
+            data: data,
+            options: {
+                onClick: (event, elements) => {
+                    // Check if a bar was clicked
+                    if (elements.length > 0) {
+                        const index = elements[0].index; // Get the index of the clicked bar
+                        const label = data.labels[index]; // Get the label of the clicked bar
+
+                        // Redirect based on the label
+                        if (label === 'Incorrect Questions') {
+                            window.location.href = 'questions.php?type=incorrect'; // Redirect to Incorrect Questions page
+                        }
+                    }
+                },
+                responsive: true,
+                plugins: {
+                    legend: {
+                        display: false // Hide the legend
+                    }
+                }
+            }
+        };
+
+        // Render the Chart
+        const myChart = new Chart(
+            document.getElementById('myChart'),
+            config
+        );
+    </script>
+</body>
+</html>

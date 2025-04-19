@@ -1,0 +1,105 @@
+Array
+(
+    [question_id] => 4734
+    [selected_answer] => D
+    [reviewed] => 
+    [problematic] => 
+)
+Array
+(
+    [question_id] => 4618
+    [selected_answer] => A
+    [reviewed] => 
+    [problematic] => 
+)
+Array
+(
+    [question_id] => 4635
+    [selected_answer] => C
+    [reviewed] => 
+    [problematic] => 
+)
+Array
+(
+    [question_id] => 4618
+    [selected_answer] => C
+    [reviewed] => 
+    [problematic] => 
+)
+Array
+(
+    [question_id] => 4692
+    [selected_answer] => D
+    [reviewed] => 
+    [problematic] => 
+)
+Array
+(
+    [question_id] => 4730
+    [selected_answer] => D
+    [reviewed] => 
+    [problematic] => 
+)
+Array
+(
+    [question_id] => 4740
+    [selected_answer] => B
+    [reviewed] => 
+    [problematic] => 
+)
+Array
+(
+    [question_id] => 4767
+    [selected_answer] => A
+    [reviewed] => 
+    [problematic] => 
+)
+Array
+(
+    [question_id] => 4772
+    [selected_answer] => A
+    [reviewed] => 
+    [problematic] => 
+)
+Array
+(
+    [question_id] => 4775
+    [selected_answer] => B
+    [reviewed] => 
+    [problematic] => 
+)
+Array
+(
+    [question_id] => 4793
+    [selected_answer] => D
+    [reviewed] => 
+    [problematic] => 
+)
+Array
+(
+    [question_id] => 4800
+    [selected_answer] => D
+    [reviewed] => 
+    [problematic] => 
+)
+Array
+(
+    [question_id] => 4825
+    [selected_answer] => C
+    [reviewed] => 
+    [problematic] => 
+)
+Array
+(
+    [question_id] => 4853
+    [selected_answer] => B
+    [reviewed] => 
+    [problematic] => 
+)
+Array
+(
+    [question_id] => 4908
+    [selected_answer] => D
+    [reviewed] => 
+    [problematic] => 
+)

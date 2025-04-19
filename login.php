@@ -1,4 +1,9 @@
-<?php if (session_status() == PHP_SESSION_NONE) { session_start(); } ?>
+<?php if (session_status() == PHP_SESSION_NONE) { session_start(); } 
+
+
+
+
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -114,4 +119,10 @@
         </div>
     </div>
 </body>
+<script>
+    window.onload = function() {
+        document.querySelector("input[name='email']").focus();
+    };
+</script>
+
 </html>

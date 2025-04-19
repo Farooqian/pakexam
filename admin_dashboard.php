@@ -104,8 +104,9 @@ $role = $user['role'];
     <?php if ($role == "student") : ?>
         <div class="btn-container">
             <a href="select.php" class="btn btn-primary">Start Exam</a>
+            <a href="results.php" class="btn btn-primary">Results</a>
             <a href="s_results.php" class="btn btn-primary">Results</a>
-            <a href="analysis.php" class="btn btn-primary">Analysis</a>
+            <a href="subject_analysis.php" class="btn btn-primary">Analysis</a>
             <a href="logout.php" class="btn btn-danger">Logout</a>
         </div>
     <?php endif; ?>
@@ -121,7 +122,6 @@ $role = $user['role'];
             <a href="results_admin.php" class="btn btn-primary">All Results</a>
             <a href="top_students.php" class="btn btn-primary">Top Students</a>
             <a href="admin_analysis.php" class="btn btn-primary">Analysis</a>
-            <a href="exam_stats.php" class="btn btn-primary">Exma Statics</a>
             <a href="logout.php" class="btn btn-danger">Logout</a>
         </div>
     <?php endif; ?>

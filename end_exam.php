@@ -1,50 +1,38 @@
 <?php
-session_start();
-require 'db_connection.php';
+// Start output buffering to prevent "headers already sent" issues
+ob_start();
 
-if (!isset($_SESSION['student_id'], $_SESSION['exam_id'])) {
-    die("Invalid session!");
+// Start the session if it's not already active
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
 }
 
-$student_id = $_SESSION['student_id'];
-$exam_id = $_SESSION['exam_id'];
+ini_set('display_errors', 1);
+error_reporting(E_ALL);
 
-// Fetch attempted answers
-$query = "SELECT COUNT(*) AS attempted FROM results WHERE exam_id = ? AND student_id = ? AND answer IS NOT NULL";
+// Check if required session variables are set
+$exam_id = $_SESSION['exam_id'] ?? null;
+$user_id = $_SESSION['user_id'] ?? null;
+
+if (!$exam_id || !$user_id) {
+    echo "Error: Missing session data (exam_id or user_id).";
+    exit;
+}
+
+// Include database connection
+include 'db_connection.php';
+
+// Save exam state as completed (example query)
+$query = "UPDATE exam_progress SET end_time = NOW() WHERE exam_id = ? AND student_id = ?";
 $stmt = $conn->prepare($query);
-$stmt->bind_param("si", $exam_id, $student_id);
-$stmt->execute();
-$stmt->bind_result($attempted_questions);
-$stmt->fetch();
-$stmt->close();
+$stmt->bind_param("ss", $exam_id, $user_id);
 
-// Fetch total questions
-$total_questions = $_SESSION['total_questions'];
+if (!$stmt->execute()) {
+    echo "Error: Failed to update exam status.";
+    exit;
+}
 
-// Fetch correct answers
-$query = "SELECT COUNT(*) AS correct FROM results WHERE exam_id = ? AND student_id = ? AND answer = correct_answer";
-$stmt = $conn->prepare($query);
-$stmt->bind_param("si", $exam_id, $student_id);
-$stmt->execute();
-$stmt->bind_result($correct_answers);
-$stmt->fetch();
-$stmt->close();
-
-// Calculate incorrect answers
-$incorrect_answers = $attempted_questions - $correct_answers;
-$unattempted_questions = $total_questions - $attempted_questions;
-
-// Store exam summary
-$query = "INSERT INTO exam (exam_id, student_id, total_questions, attempted_questions, unattempted_questions, correct, incorrect) 
-          VALUES (?, ?, ?, ?, ?, ?, ?)";
-$stmt = $conn->prepare($query);
-$stmt->bind_param("siiiiii", $exam_id, $student_id, $total_questions, $attempted_questions, $unattempted_questions, $correct_answers, $incorrect_answers);
-$stmt->execute();
-$stmt->close();
-
-// Clear session
-unset($_SESSION['exam_id'], $_SESSION['questions'], $_SESSION['total_questions'], $_SESSION['current_question']);
-
-header("Location: analyser.php?exam_id=" . $exam_id);
+// Redirect to the results page
+header("Location: results.php");
 exit;
 ?>

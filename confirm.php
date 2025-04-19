@@ -3,19 +3,19 @@ if (session_status() == PHP_SESSION_NONE) {
     session_start();
 }
 
-include 'db_connection.php';
+ini_set('display_errors', 1);
+error_reporting(E_ALL);
 
-if (!isset($_SESSION["user_id"])) {
+include 'db_connection.php';
+include_once 'functions.php';
+
+if (!isset($_SESSION['user_id'])) {
     header("Location: login.php");
     exit();
 }
 
-if (!isset($_GET['organization']) || !isset($_GET['subject'])) {
-    header("Location: select.php");
-    exit();
-}
-
-$user_id = $_SESSION["user_id"];
+// Fetch user
+$user_id = $_SESSION['user_id'];
 $query = "SELECT full_name, email, registration_number FROM users WHERE id = ?";
 $stmt = $conn->prepare($query);
 $stmt->bind_param("i", $user_id);
@@ -28,16 +28,112 @@ if (!$user) {
     exit();
 }
 
+$student_id = $user['registration_number'];
+$_SESSION['student_id'] = $student_id;
+
+// Generate exam ID
+$year=date('y');
+$month=date('m');
+$day = date('d');
+$time = date('Hi');
+$exam_id = substr($student_id . $year . $month . $day . $time, 0, 20);
+$_SESSION['exam_id'] = $exam_id;
+
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['confirm_exam'])) {
+    if (!isset($_SESSION['organization']) || !isset($_SESSION['subject'])) {
+        header("Location: select.php");
+        exit();
+    }
+
+    $organization = $_SESSION['organization'];
+    $subject = $_SESSION['subject'];
+
+ 
+
+    // RANDOMIZE LOGIC: Fetch all matching question IDs
+    $query = "SELECT id FROM MCQs WHERE organization = ? AND subject = ?";
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param("ss", $organization, $subject);
+    $stmt->execute();
+    $result = $stmt->get_result();
+
+    $question_ids = [];
+    while ($row = $result->fetch_assoc()) {
+        $question_ids[] = $row['id'];
+    }
+
+    // Shuffle and select 50
+    shuffle($question_ids);
+    $selected_ids = array_slice($question_ids, 0, 50);
+
+    if (count($selected_ids) === 0) {
+        die("No questions available for selected subject and organization.");
+    }
+
+    // Fetch full question data
+    $placeholders = implode(',', array_fill(0, count($selected_ids), '?'));
+    $types = str_repeat('i', count($selected_ids));
+    $query = "SELECT id, question, option1, option2, option3, option4, correct_answer FROM MCQs WHERE id IN ($placeholders)";
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param($types, ...$selected_ids);
+    $stmt->execute();
+    $question_result = $stmt->get_result();
+
+    $questions = [];
+    while ($row = $question_result->fetch_assoc()) {
+        $questions[] = $row;
+    }
+
+    $total_questions = count($questions);
+    $exam_duration = ($total_questions < 50) ? ceil($total_questions * 0.6) : 30;
+
+    $_SESSION['questions'] = $questions;
+    $_SESSION['total_questions'] = $total_questions;
+    $_SESSION['exam_duration'] = $exam_duration;
+    $_SESSION['exam_end_time'] = time() + ($exam_duration * 60);
+
+    // Save into exam_questions and exam_progress
+    foreach ($questions as $question) {
+        // Save exam_questions
+        $query = "INSERT INTO exam_questions (exam_id, student_id, question_id, question, option1, option2, option3, option4, correct_answer) 
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        $stmt = $conn->prepare($query);
+        $stmt->bind_param("siissssss", $exam_id, $student_id, $question['id'], $question['question'], $question['option1'], $question['option2'], $question['option3'], $question['option4'], $question['correct_answer']);
+        $stmt->execute();
+
+        // Save exam_progress
+        $query = "INSERT INTO exam_progress (exam_id, student_id, organization, subject, question_id, question, option1, option2, option3, option4, correct_answer, start_time, end_time) 
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? MINUTE))";
+        $stmt = $conn->prepare($query);
+        $stmt->bind_param("sississssssi", $exam_id, $student_id, $organization, $subject, $question['id'], $question['question'], $question['option1'], $question['option2'], $question['option3'], $question['option4'], $question['correct_answer'], $exam_duration);
+        $stmt->execute();
+    }
+
+    // Start the exam
+    header("Location: exam.php");
+    exit();
+}
+
+// GET only
+if (!isset($_GET['organization']) || !isset($_GET['subject'])) {
+    header("Location: select.php");
+    exit();
+}
+
 $organization = htmlspecialchars($_GET['organization']);
 $subject = htmlspecialchars($_GET['subject']);
-$session_id = session_id();
+$_SESSION['organization'] = $organization;
+$_SESSION['subject'] = $subject;
+
+$_SESSION['full_name'] = $user['full_name'];
+$_SESSION['email'] = $user['email'];
 ?>
 
+<!-- HTML remains unchanged -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Confirm Details | ProjectD</title>
     <style>
         body {
@@ -48,7 +144,6 @@ $session_id = session_id();
             padding: 0;
             text-align: center;
         }
-        
         .container {
             background: white;
             padding: 20px;
@@ -59,14 +154,12 @@ $session_id = session_id();
             margin: 50px auto;
             color: black;
         }
-
         .details-box {
             background: #f4f4f4;
             padding: 15px;
             border-radius: 10px;
             margin-bottom: 20px;
         }
-
         .btn {
             display: inline-block;
             padding: 10px 20px;
@@ -74,13 +167,11 @@ $session_id = session_id();
             text-decoration: none;
             font-weight: bold;
             transition: 0.3s;
-            text-align: center;
             font-size: 16px;
-            margin-top: 20px;
             background: #1E90FF;
             color: white;
+            border: none;
         }
-
         .btn:hover {
             background: #FF69B4;
         }
@@ -94,14 +185,13 @@ $session_id = session_id();
         <p><strong>Name:</strong> <?= htmlspecialchars($user['full_name']) ?></p>
         <p><strong>Email:</strong> <?= htmlspecialchars($user['email']) ?></p>
         <p><strong>Student ID:</strong> <?= htmlspecialchars($user['registration_number']) ?></p>
-        <p><strong>Subject:</strong> <?= $subject ?></p>
-        <p><strong>Organization:</strong> <?= $organization ?></p>
-        <p><strong>Session ID:</strong> <?= $session_id ?></p>
+        <p><strong>Subject:</strong> <?= htmlspecialchars($subject) ?></p>
+        <p><strong>Organization:</strong> <?= htmlspecialchars($organization) ?></p>
+        <p><strong>Exam ID:</strong> <?= htmlspecialchars($exam_id) ?></p>
     </div>
 
-    <form action="exam.php" method="GET">
-        <input type="hidden" name="organization" value="<?= $organization ?>">
-        <input type="hidden" name="subject" value="<?= $subject ?>">
+    <form action="confirm.php" method="POST">
+        <input type="hidden" name="confirm_exam" value="1">
         <button type="submit" class="btn">Confirm and Start Exam</button>
     </form>
 </div>

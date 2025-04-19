@@ -3,204 +3,232 @@ if (session_status() == PHP_SESSION_NONE) {
     session_start();
 }
 
-include 'db_connection.php';
+ini_set('display_errors', 1);
+error_reporting(E_ALL);
 
-if (!isset($_SESSION["user_id"])) {
+// Ensure the user is logged in and session variables are set
+if (!isset($_SESSION['user_id']) || !isset($_SESSION['exam_id'])) {
     header("Location: login.php");
     exit();
 }
 
-if (!isset($_GET['organization']) || !isset($_GET['subject'])) {
-    header("Location: confirm.php");
-    exit();
+// Retrieve exam ID and initialize current question index
+$exam_id = $_SESSION['exam_id'];
+if (!isset($_SESSION['current_question_index'])) {
+    $_SESSION['current_question_index'] = 0; // Start from the first question
 }
 
-$user_id = $_SESSION["user_id"];
-$query = "SELECT full_name, email, registration_number FROM users WHERE id = ?";
+$current_index = $_SESSION['current_question_index'];
+
+// Retrieve student and exam info from session
+$full_name = htmlspecialchars($_SESSION['full_name']);
+$email = htmlspecialchars($_SESSION['email']);
+$student_id = htmlspecialchars($_SESSION['student_id']);
+$organization = htmlspecialchars($_SESSION['organization']);
+$subject = htmlspecialchars($_SESSION['subject']);
+
+// Get the detected timezone from POST (if submitted) or default to UTC
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['timezone'])) {
+    $_SESSION['timezone'] = $_POST['timezone']; // Store the detected timezone in the session
+}
+
+$student_timezone = $_SESSION['timezone'] ?? 'UTC'; // Use UTC if timezone is not set
+
+// Fetch questions from the database
+include 'db_connection.php';
+$query = "SELECT question_id, question, option1, option2, option3, option4, selected_answer, is_reviewed, is_problematic, start_time, end_time 
+          FROM exam_progress 
+          WHERE exam_id = ? 
+          ORDER BY question_id ASC";
 $stmt = $conn->prepare($query);
-$stmt->bind_param("i", $user_id);
+$stmt->bind_param("s", $exam_id);
 $stmt->execute();
 $result = $stmt->get_result();
-$user = $result->fetch_assoc();
 
-if (!$user) {
-    echo "User not found!";
-    exit();
+$questions = [];
+while ($row = $result->fetch_assoc()) {
+    $questions[] = $row;
 }
 
-$organization = htmlspecialchars($_GET['organization']);
-$subject = htmlspecialchars($_GET['subject']);
-$session_id = session_id();
+$total_questions = count($questions);
 
-// Check if the exam time is up
-if (isset($_SESSION['exam_end_time']) && time() > $_SESSION['exam_end_time']) {
-    // Clear exam session variables
-    unset($_SESSION['questions']);
-    unset($_SESSION['total_questions']);
-    unset($_SESSION['exam_duration']);
-    unset($_SESSION['answers']);
-    unset($_SESSION['reviewedQuestions']);
-    unset($_SESSION['problematicQuestions']);
-    unset($_SESSION['exam_end_time']);
-    // Temporarily comment out the alert
-    // echo "<script>alert('Time\'s up! The exam will now end.'); window.location.href = 'confirm.php';</script>";
-    header("Location: confirm.php"); // Redirect without alert
-    exit();
+// Ensure the current index is within valid bounds
+if ($current_index < 0) {
+    $current_index = 0;
+} elseif ($current_index >= $total_questions) {
+    $current_index = $total_questions - 1;
 }
 
-// Fetch questions only if they are not already stored in the session
-if (!isset($_SESSION['questions']) || !isset($_SESSION['total_questions']) || !isset($_SESSION['exam_duration'])) {
-    $question_query = "SELECT id, question, option1, option2, option3, option4 FROM MCQs WHERE organization = ? AND subject = ? ORDER BY RAND() LIMIT 50";
-    $stmt = $conn->prepare($question_query);
-    $stmt->bind_param("ss", $organization, $subject);
-    $stmt->execute();
-    $question_result = $stmt->get_result();
-
-    $questions = [];
-    while ($row = $question_result->fetch_assoc()) {
-        $questions[] = $row;
+// Handle navigation
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (isset($_POST['go_to_question'])) {
+        $selected_question = (int)$_POST['go_to_question'];
+        if ($selected_question >= 0 && $selected_question < $total_questions) {
+            $current_index = $selected_question;
+        }
+    } elseif (isset($_POST['previous']) && $current_index > 0) {
+        $current_index--;
+    } elseif (isset($_POST['next']) && $current_index < $total_questions - 1) {
+        $current_index++;
+    } elseif (isset($_POST['end_exam'])) {
+        header("Location: end_exam.php"); // Redirect to exam submission
+        exit();
     }
 
-    $total_questions = count($questions);
-    $exam_duration = ($total_questions < 50) ? ceil($total_questions * 0.6) : 30;
-
-    $_SESSION['questions'] = $questions;
-    $_SESSION['total_questions'] = $total_questions;
-    $_SESSION['exam_duration'] = $exam_duration;
-    $_SESSION['exam_end_time'] = time() + ($exam_duration * 60); // Set exam end time
-} else {
-    $questions = $_SESSION['questions'];
-    $total_questions = $_SESSION['total_questions'];
-    $exam_duration = $_SESSION['exam_duration'];
+    // Update the session with the new current index
+    $_SESSION['current_question_index'] = $current_index;
 }
 
-// Initialize answers, reviewedQuestions, and problematicQuestions if not set
-if (!isset($_SESSION['answers'])) {
-    $_SESSION['answers'] = [];
-}
-if (!isset($_SESSION['reviewedQuestions'])) {
-    $_SESSION['reviewedQuestions'] = [];
-}
-if (!isset($_SESSION['problematicQuestions'])) {
-    $_SESSION['problematicQuestions'] = [];
+// Get the current question
+$current_question = $questions[$current_index];
+
+// Convert UTC times to local timezone
+function convertToLocalTime($utc_time, $timezone) {
+    try {
+        $date = new DateTime($utc_time, new DateTimeZone('UTC')); // Create DateTime object with UTC timezone
+        $date->setTimezone(new DateTimeZone($timezone)); // Convert to student's local timezone
+        return $date->format('Y-m-d H:i:s'); // Format the date
+    } catch (Exception $e) {
+        return $utc_time; // Return original UTC time if conversion fails
+    }
 }
 
-$answers = $_SESSION['answers'];
-$reviewedQuestions = $_SESSION['reviewedQuestions'];
-$problematicQuestions = $_SESSION['problematicQuestions'];
+// Calculate remaining time
+function calculateRemainingTime($end_time, $timezone) {
+    try {
+        $current_time = new DateTime('now', new DateTimeZone($timezone)); // Get the current time in the student's local timezone
+        $end_time_local = new DateTime($end_time, new DateTimeZone('UTC')); // Convert end_time to UTC
+        $end_time_local->setTimezone(new DateTimeZone($timezone)); // Convert end_time to local timezone
 
-// Debug information to check the current state of session variables
-echo "<pre>";
-print_r($_SESSION);
-echo "</pre>";
+        if ($end_time_local > $current_time) {
+            return $end_time_local->getTimestamp() - $current_time->getTimestamp(); // Return the remaining time in seconds
+        }
+        return 0; // No remaining time
+    } catch (Exception $e) {
+        return 0; // Return 0 if calculation fails
+    }
+}
+
+$start_time_local = convertToLocalTime($current_question['start_time'], $student_timezone);
+$end_time_local = convertToLocalTime($current_question['end_time'], $student_timezone);
+$remaining_time_seconds = calculateRemainingTime($current_question['end_time'], $student_timezone);
+
+// Generate dropdown options with question statuses
+function generateQuestionDropdown($questions, $current_index) {
+    $dropdown_html = "";
+    foreach ($questions as $index => $question) {
+        $status = "";
+        $selected = $index === $current_index ? "selected" : "";
+
+        // Determine the status of the question
+        if (empty($question['selected_answer'])) {
+            $status = "X"; // Unattempted
+        } else {
+            $status = "O"; // Attempted
+        }
+
+        if ($question['is_reviewed']) {
+            $status .= " - #"; // Marked for review
+        }
+
+        $dropdown_html .= "<option value='{$index}' {$selected}>Q " . ($index + 1) . " - {$status}</option>";
+    }
+    return $dropdown_html;
+}
 ?>
 
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Exam | ProjectD</title>
+    <title>Exam Page | ProjectD</title>
     <style>
         body {
-            font-family: Arial, sans-serif;
-            background: linear-gradient(135deg, #1E90FF, #FF69B4);
-            color: white;
+            font-family: 'Arial', sans-serif;
+            background: #f5f5f5;
+            color: #333;
             margin: 0;
             padding: 0;
-            text-align: center;
+            line-height: 1.6;
         }
-        
         .container {
-            background: white;
+            background: #ffffff;
             padding: 20px;
             border-radius: 10px;
-            box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.2);
+            box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.1);
             width: 90%;
-            max-width: 800px;
+            max-width: 1000px;
             margin: 50px auto;
-            color: black;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
         }
-
         .info-container {
-            background: #f0f8ff;
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+        .info-box {
+            width: 30%;
+            background: #eaf4fc;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .info-box h3 {
+            margin-bottom: 10px;
+            color: #0077cc;
+        }
+        .timer {
+            font-size: 1.5em;
+            color: #d9534f;
+            font-weight: bold;
+        }
+        .question-box {
+            background: #fdfdfd;
             padding: 15px;
             border-radius: 10px;
             margin-bottom: 20px;
-            width: 100%;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+            box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
         }
-
-        .info-box {
-            text-align: left;
-            width: 45%;
-        }
-
-        .timer {
-            font-size: 24px;
-            background: #f0f8ff;
-            padding: 10px;
-            border-radius: 10px;
-            color: #ff4500;
-        }
-
-        .progress {
-            font-size: 24px;
-            background: #f0f8ff;
-            padding: 10px;
-            border-radius: 10px;
-            color: #32cd32;
-        }
-
-        .question-container {
-            background: #f5fffa;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.2);
-            width: 100%;
+        .options-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
             margin-bottom: 20px;
         }
-
-        .option-container {
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: space-between;
-        }
-
-        .option-container div {
-            width: 48%;
-            background: #ffffff;
-            padding: 10px;
-            margin: 5px 0;
-            border-radius: 5px;
+        .option {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 8px;
             cursor: pointer;
-            transition: 0.3s;
+            transition: background 0.3s ease, color 0.3s ease;
+            text-align: center;
+            font-weight: bold;
+            border: 2px solid transparent;
         }
-
-        .option-container div:hover {
-            background: #e0ffff;
+        .option:hover {
+            background: #e0f7fa;
+            color: #00796b;
         }
-
-        input[type="radio"]:checked + label {
-            background: #87cefa;
+        .option.selected {
+            background: #b2dfdb;
+            color: #004d40;
+            border-color: #00796b;
         }
-
         .checkbox-container {
             display: flex;
             justify-content: space-between;
-            margin-top: 10px;
-            font-size: 14px;
+            margin-bottom: 20px;
         }
-
-        .navigation {
-            margin-top: 20px;
+        .checkbox-container label {
+            font-weight: bold;
+            color: #555;
         }
-
+        .navigation-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            gap: 15px;
+        }
         .btn {
             display: inline-block;
             padding: 10px 20px;
@@ -208,257 +236,206 @@ echo "</pre>";
             text-decoration: none;
             font-weight: bold;
             transition: 0.3s;
-            text-align: center;
             font-size: 16px;
-            margin: 5px;
-            background: #1E90FF;
+            background: #0077cc;
             color: white;
+            border: none;
+            cursor: pointer;
         }
-
         .btn:hover {
-            background: #FF69B4;
+            background: #005fa3;
+        }
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .dropdown-container select {
+            padding: 10px;
+            font-size: 16px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+            width: 200px;
+            height: 40px;
+            text-align: center;
+            cursor: pointer;
+            background: #f0f0f0;
+        }
+        .dropdown-container select:hover {
+            border-color: #0077cc;
+            background: #eaf4fc;
+        }
+    </style>
+    <script>
+        // Initialize countdown timer
+        let remainingTime = <?= $remaining_time_seconds ?>; // from PHP
+// Calculate the absolute end timestamp in milliseconds
+const endTime = new Date().getTime() + remainingTime * 1000;
+
+        function startTimer() {
+    const timerElement = document.getElementById('timer');
+    if (!timerElement) return;
+
+    const interval = setInterval(() => {
+        // Get current time in milliseconds
+        const now = new Date().getTime();
+        // Calculate the difference in seconds
+        let timeLeft = Math.floor((endTime - now) / 1000);
+        
+        // If time is up, clear the interval and handle expiration
+        if (timeLeft <= 0) {
+            clearInterval(interval);
+            timerElement.textContent = "Time's up!";
+            // Optionally perform a redirection or execute a function
+            window.location.href = "end_exam.php";
+            return;
+        }
+        
+        // Convert seconds to HH:MM:SS
+        const hours = Math.floor(timeLeft / 3600);
+        const minutes = Math.floor((timeLeft % 3600) / 60);
+        const seconds = timeLeft % 60;
+        timerElement.textContent = 
+            `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }, 1000); // Update every second
+}
+
+document.addEventListener('DOMContentLoaded', startTimer);
+
+        document.addEventListener('DOMContentLoaded', startTimer);
+
+        // Save selected answer
+        function saveAnswer(questionId, selectedOption) {
+            const xhr = new XMLHttpRequest();
+            xhr.open("POST", "update_answer.php", true);
+            xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+            xhr.onreadystatechange = function () {
+                if (xhr.readyState === 4 && xhr.status === 200) {
+                    document.querySelectorAll(".option").forEach(option => option.classList.remove("selected"));
+                    document.getElementById("option-" + selectedOption).classList.add("selected");
+                }
+            };
+            xhr.send(`question_id=${questionId}&selected_answer=${selectedOption}`);
         }
 
-    </style>
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script>
-    window.addEventListener('beforeunload', function (e) {
-        var confirmationMessage = 'Are you sure you want to leave? Your progress will be lost.';
-
-        (e || window.event).returnValue = confirmationMessage;
-        return confirmationMessage;
-    });
+        // Update checkbox state
+        function updateCheckbox(questionId, columnName, isChecked) {
+            const xhr = new XMLHttpRequest();
+            xhr.open("POST", "update_question_flags.php", true);
+            xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+            xhr.onreadystatechange = function () {};
+            xhr.send(`question_id=${questionId}&column_name=${columnName}&is_checked=${isChecked ? 1 : 0}`);
+        }
     </script>
 </head>
 <body>
 
 <div class="container">
+    <!-- Info Section -->
     <div class="info-container">
         <div class="info-box">
-            <p><strong>Name:</strong> <?= htmlspecialchars($user['full_name']) ?></p>
-            <p><strong>Email:</strong> <?= htmlspecialchars($user['email']) ?></p>
-            <p><strong>Student ID:</strong> <?= htmlspecialchars($user['registration_number']) ?></p>
+            <h3>Student Information</h3>
+            <p><strong>Name:</strong> <?= $full_name ?></p>
+            <p><strong>Email:</strong> <?= $email ?></p>
+            <p><strong>ID:</strong> <?= $student_id ?></p>
         </div>
         <div class="info-box">
-            <p><strong>Organization:</strong> <?= $organization ?></p>
+            <h3>Exam Details</h3>
+            <p><strong>Exam ID:</strong> <?= $exam_id ?></p>
             <p><strong>Subject:</strong> <?= $subject ?></p>
+            <p><strong>Subject:</strong> <?= $organization ?></p>
         </div>
-        <div class="progress">Progress: <span id="progress">1/<?= $total_questions ?></span></div>
-        <div class="timer" id="timer"></div>
+        <div class="info-box">
+            <h3>Timing Information</h3>
+            <p><strong>Start Time:</strong> <?= $start_time_local ?> UTC </p>
+            <p><strong>End Time:</strong> <?= $end_time_local ?> UTC </p>
+            <p><strong>Remaining Time:</strong> <span id="timer" class="timer"></span></p>
+        </div>
     </div>
 
-    <form id="exam-form" action="submit_exam.php" method="POST">
-        <div class="question-container" id="question-box">
-            <!-- Questions will be dynamically loaded here -->
-        </div>
-
-        <div class="navigation">
-            <button type="button" class="btn" id="prev-btn" disabled>Previous Question</button>
-            <button type="button" class="btn" id="next-btn">Next Question</button>
-            <button type="submit" class="btn" id="end-btn" style="display:none;">End Exam</button>
-        </div>
-
-        <div class="navigation">
-            <label for="question-nav">Go to Question:</label>
-            <select id="question-nav">
-                <?php for ($i = 1; $i <= $total_questions; $i++): ?>
-                    <option value="<?= $i ?>">Q - <?= $i ?> - X</option>
-                <?php endfor; ?>
-            </select>
-        </div>
-    </form>
-</div>
-
-<script>
-let questions = <?= json_encode($questions) ?>;
-let currentQuestionIndex = 0;
-let totalQuestions = <?= $total_questions ?>;
-let examDuration = <?= $exam_duration ?> * 60; // in seconds
-let timerInterval;
-let answers = <?= json_encode($answers) ?>;
-let reviewedQuestions = <?= json_encode($reviewedQuestions) ?>;
-let problematicQuestions = <?= json_encode($problematicQuestions) ?>;
-
-function loadQuestion(index) {
-    let question = questions[index];
-    let questionBox = document.getElementById('question-box');
-    questionBox.innerHTML = `
-        <h3>Question ${index + 1}</h3>
-        <p>${question.question}</p>
-        <div class="option-container">
-            <div>
-                <input type="radio" name="answer" value="1" id="option1" ${answers[question.id] == '1' ? 'checked' : ''}>
-                <label for="option1">${question.option1}</label>
-            </div>
-            <div>
-                <input type="radio" name="answer" value="2" id="option2" ${answers[question.id] == '2' ? 'checked' : ''}>
-                <label for="option2">${question.option2}</label>
-            </div>
-            <div>
-                <input type="radio" name="answer" value="3" id="option3" ${answers[question.id] == '3' ? 'checked' : ''}>
-                <label for="option3">${question.option3}</label>
-            </div>
-            <div>
-                <input type="radio" name="answer" value="4" id="option4" ${answers[question.id] == '4' ? 'checked' : ''}>
-                <label for="option4">${question.option4}</label>
-            </div>
+    <!-- Question Section -->
+    <div class="question-box">
+        <h2>Question <?= $current_index + 1 ?> of <?= $total_questions ?></h2>
+        <p><?= htmlspecialchars($current_question['question']) ?></p>
+        <div class="options-container">
+            <?php foreach (['A', 'B', 'C', 'D'] as $index => $option): ?>
+                <div id="option-<?= $option ?>" class="option <?= $current_question['selected_answer'] === $option ? 'selected' : '' ?>"
+                     onclick="saveAnswer(<?= $current_question['question_id'] ?>, '<?= $option ?>')">
+                    <?= htmlspecialchars($current_question['option' . ($index + 1)]) ?>
+                </div>
+            <?php endforeach; ?>
         </div>
         <div class="checkbox-container">
-            <label><input type="checkbox" name="review" ${reviewedQuestions.includes(question.id) ? 'checked' : ''}> Mark for Review</label>
-            <label><input type="checkbox" name="problematic" ${problematicQuestions.includes(question.id) ? 'checked' : ''}> Mark as Problematic</label>
+            <label>
+                <input type="checkbox" <?= $current_question['is_reviewed'] ? 'checked' : '' ?>
+                       onchange="updateCheckbox(<?= $current_question['question_id'] ?>, 'is_reviewed', this.checked)">
+                Mark for Review
+            </label>
+            <label>
+                <input type="checkbox" <?= $current_question['is_problematic'] ? 'checked' : '' ?>
+                       onchange="updateCheckbox(<?= $current_question['question_id'] ?>, 'is_problematic', this.checked)">
+                Mark as Problematic
+            </label>
         </div>
-    `;
+    </div>
 
-    document.getElementById('progress').innerText = `${index + 1}/${totalQuestions}`;
-    document.getElementById('prev-btn').disabled = (index === 0);
-    document.getElementById('next-btn').style.display = (index === totalQuestions - 1) ? 'none' : 'inline-block';
-    document.getElementById('end-btn').style.display = (index === totalQuestions - 1) ? 'inline-block' : 'none';
-    updateQuestionNav();
+    <!-- Navigation Buttons and Dropdown -->
+    <div class="navigation-container">
+    <!-- Previous Button -->
+    <form method="POST">
+        <button type="submit" name="previous" class="btn" <?= $current_index === 0 ? 'disabled' : '' ?>>Previous</button>
+    </form>
+
+    <!-- Dropdown -->
+    <form method="POST" class="dropdown-container">
+        <select name="go_to_question" onchange="this.form.submit()">
+            <?= generateQuestionDropdown($questions, $current_index) ?>
+        </select>
+    </form>
+
+    <!-- Next Button and End Exam Button -->
+    <form method="POST">
+        <!-- Disable Next button if on the last question -->
+        <button type="submit" name="next" class="btn" <?= $current_index === $total_questions - 1 ? 'disabled' : '' ?>>Next</button>
+
+        <!-- Show End Exam button only on the last question -->
+        <?php if ($current_index === $total_questions - 1): ?>
+            <button type="submit" name="end_exam" class="btn">End Exam</button>
+        <?php endif; ?>
+    </form>
+</div>
+<script>
+let endTime = Date.now() + (<?= $remaining_time_seconds ?> * 1000);
+
+function startTimer() {
+    const timerElement = document.getElementById('timer');
+
+    function updateTimer() {
+        let now = Date.now();
+        let diff = endTime - now;
+
+        if (diff <= 0) {
+            timerElement.textContent = "Time's up!";
+            window.location.href = "end_exam.php"; // or trigger form submit
+            return;
+        }
+
+        let totalSeconds = Math.floor(diff / 1000);
+        let hours = Math.floor(totalSeconds / 3600);
+        let minutes = Math.floor((totalSeconds % 3600) / 60);
+        let seconds = totalSeconds % 60;
+
+        timerElement.textContent = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+
+        requestAnimationFrame(updateTimer);
+    }
+
+    requestAnimationFrame(updateTimer);
 }
 
-function updateQuestionNav() {
-    let questionNav = document.getElementById('question-nav');
-    questionNav.innerHTML = '';
-    for (let i = 1; i <= totalQuestions; i++) {
-        let status = 'X';
-        if (answers[questions[i - 1].id]) {
-            status = 'O';
-        }
-        if (reviewedQuestions.includes(questions[i - 1].id)) {
-            status += ' #';
-        }
-        let option = document.createElement('option');
-        option.value = i;
-        option.text = `Q - ${i} - ${status}`;
-        questionNav.add(option);
-    }
-}
-
-function saveState() {
-    $.ajax({
-        type: 'POST',
-        url: 'save_state.php',
-        data: {
-            answers: JSON.stringify(answers),
-            reviewedQuestions: JSON.stringify(reviewedQuestions),
-            problematicQuestions: JSON.stringify(problematicQuestions)
-        }
-    });
-}
-
-function startTimer(duration) {
-    let timer = localStorage.getItem('exam_timer') ? parseInt(localStorage.getItem('exam_timer'), 10) : duration;
-    let minutes, seconds;
-    timerInterval = setInterval(function () {
-        minutes = parseInt(timer / 60, 10);
-        seconds = parseInt(timer % 60, 10);
-
-        minutes = minutes < 10 ? "0" + minutes : minutes;
-        seconds = seconds < 10 ? "0" + seconds : seconds;
-
-        document.getElementById('timer').textContent = minutes + ":" + seconds;
-
-        if (--timer < 0) {
-            clearInterval(timerInterval);
-            localStorage.removeItem('exam_timer');
-            alert("Time's up! The exam will now end.");
-            document.getElementById('exam-form').submit();
-        }
-
-        if (timer < 300) { // less than 5 minutes
-            document.getElementById('timer').style.color = 'red';
-        }
-
-        localStorage.setItem('exam_timer', timer);
-    }, 1000);
-}
-
-document.getElementById('next-btn').addEventListener('click', function(event) {
-    event.preventDefault();
-    let question = questions[currentQuestionIndex];
-    answers[question.id] = document.querySelector('input[name="answer"]:checked')?.value;
-    if (document.querySelector('input[name="review"]').checked) {
-        if (!reviewedQuestions.includes(question.id)) {
-            reviewedQuestions.push(question.id);
-        }
-    } else {
-        reviewedQuestions = reviewedQuestions.filter(id => id !== question.id);
-    }
-    if (document.querySelector('input[name="problematic"]').checked) {
-        if (!problematicQuestions.includes(question.id)) {
-            problematicQuestions.push(question.id);
-        }
-    } else {
-        problematicQuestions = problematicQuestions.filter(id => id !== question.id);
-    }
-    saveState();
-    if (currentQuestionIndex < totalQuestions - 1) {
-        currentQuestionIndex++;
-        loadQuestion(currentQuestionIndex);
-    }
-});
-
-document.getElementById('prev-btn').addEventListener('click', function(event) {
-    event.preventDefault();
-    let question = questions[currentQuestionIndex];
-    answers[question.id] = document.querySelector('input[name="answer"]:checked')?.value;
-    if (document.querySelector('input[name="review"]').checked) {
-        if (!reviewedQuestions.includes(question.id)) {
-            reviewedQuestions.push(question.id);
-        }
-    } else {
-        reviewedQuestions = reviewedQuestions.filter(id => id !== question.id);
-    }
-    if (document.querySelector('input[name="problematic"]').checked) {
-        if (!problematicQuestions.includes(question.id)) {
-            problematicQuestions.push(question.id);
-        }
-    } else {
-        problematicQuestions = problematicQuestions.filter(id => id !== question.id);
-    }
-    saveState();
-    if (currentQuestionIndex > 0) {
-        currentQuestionIndex--;
-        loadQuestion(currentQuestionIndex);
-    }
-});
-
-document.getElementById('end-btn').addEventListener('click', function(event) {
-    if (confirm("Are you sure you want to end the exam?")) {
-        clearInterval(timerInterval);
-        localStorage.removeItem('exam_timer');
-        document.getElementById('exam-form').submit();
-    }
-});
-
-document.getElementById('question-nav').addEventListener('change', function(event) {
-    event.preventDefault();
-    let question = questions[currentQuestionIndex];
-    answers[question.id] = document.querySelector('input[name="answer"]:checked')?.value;
-    if (document.querySelector('input[name="review"]').checked) {
-        if (!reviewedQuestions.includes(question.id)) {
-            reviewedQuestions.push(question.id);
-        }
-    } else {
-        reviewedQuestions = reviewedQuestions.filter(id => id !== question.id);
-    }
-    if (document.querySelector('input[name="problematic"]').checked) {
-        if (!problematicQuestions.includes(question.id)) {
-            problematicQuestions.push(question.id);
-        }
-    } else {
-        problematicQuestions = problematicQuestions.filter(id => id !== question.id);
-    }
-    saveState();
-    let selectedQuestion = parseInt(this.value, 10) - 1;
-    currentQuestionIndex = selectedQuestion;
-    loadQuestion(currentQuestionIndex);
-});
-
-// Initialize the exam
-loadQuestion(currentQuestionIndex);
-startTimer(examDuration);
+document.addEventListener('DOMContentLoaded', startTimer);
 </script>
+</body>
+</html>
 
 </body>
 </html>

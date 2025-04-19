@@ -1,0 +1,13 @@
+<select id="questionDropdown" onchange="navigateToQuestion(this.value)">
+    <!-- Example Questions -->
+    <option value="1" data-status="X">Q1</option>
+    <option value="2" data-status="O">Q2</option>
+    <option value="3" data-status="#">Q3</option>
+</select>
+
+<script>
+// Navigate to Selected Question
+function navigateToQuestion(questionId) {
+    fetchQuestion(questionId); // Fetch the selected question
+}
+</script>

@@ -68,6 +68,29 @@
             padding: 5px;
             border-radius: 5px;
         }
+
+        /* Password Strength Bar */
+        .progress-bar {
+            width: 100%;
+            height: 5px;
+            background-color: #e0e0e0;
+            border-radius: 5px;
+            margin-top: 5px;
+        }
+        .progress-bar span {
+            display: block;
+            height: 100%;
+            border-radius: 5px;
+        }
+        .strength-weak {
+            background-color: red;
+        }
+        .strength-medium {
+            background-color: yellow;
+        }
+        .strength-strong {
+            background-color: green;
+        }
     </style>
 </head>
 <body>
@@ -88,8 +111,15 @@
                 <option value="admin">Admin</option>
             </select>
             <input type="text" name="registration_number" id="registration_number" readonly>
-            <input type="password" name="password" placeholder="Password" required>
-            <input type="password" name="confirm_password" placeholder="Confirm Password" required>
+            <input type="password" name="password" id="password" placeholder="Password" required 
+                   pattern="^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$" 
+                   title="Password must be at least 8 characters long, contain at least one uppercase letter, one lowercase letter, one digit, and one special character (e.g., @, $, %, *).">
+            <div class="progress-bar" id="passwordStrengthBar">
+                <span></span>
+            </div>
+            <input type="password" name="confirm_password" id="confirm_password" placeholder="Confirm Password" required 
+                   pattern="^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$" 
+                   title="Password must be at least 8 characters long, contain at least one uppercase letter, one lowercase letter, one digit, and one special character (e.g., @, $, %, *).">
             <label>
                 <input type="checkbox" name="terms" required> I agree to the Terms & Conditions
             </label>
@@ -133,6 +163,39 @@
             if (this.value.length === 2 || this.value.length === 5) {
                 this.value += '-';
             }
+        });
+
+        // Password strength check function
+        function checkPasswordStrength(password) {
+            var strength = 0;
+            if (password.length >= 8) strength++; // Length check
+            if (/[a-z]/.test(password)) strength++; // Lowercase check
+            if (/[A-Z]/.test(password)) strength++; // Uppercase check
+            if (/\d/.test(password)) strength++; // Number check
+            if (/[@$!%*?&]/.test(password)) strength++; // Special character check
+
+            var strengthBar = document.getElementById('passwordStrengthBar').firstElementChild;
+            if (strength === 1) {
+                strengthBar.className = 'strength-weak';
+                strengthBar.style.width = '25%';
+            } else if (strength === 2) {
+                strengthBar.className = 'strength-medium';
+                strengthBar.style.width = '50%';
+            } else if (strength === 3) {
+                strengthBar.className = 'strength-medium';
+                strengthBar.style.width = '75%';
+            } else if (strength === 4 || strength === 5) {
+                strengthBar.className = 'strength-strong';
+                strengthBar.style.width = '100%';
+            } else {
+                strengthBar.className = '';
+                strengthBar.style.width = '0%';
+            }
+        }
+
+        // Add event listener to password field
+        document.getElementById('password').addEventListener('input', function() {
+            checkPasswordStrength(this.value);
         });
     </script>
 </body>

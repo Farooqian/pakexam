@@ -1,0 +1,7 @@
+{
+    "name": "faroo/project1",
+    "minimum-stability": "stable",
+    "require": {
+        "phpoffice/phpword": "^1.3"
+    }
+}

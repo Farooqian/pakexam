@@ -72,7 +72,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['organization'])) {
             padding: 0;
             text-align: center;
         }
-        
+
         .container {
             background: white;
             padding: 20px;
@@ -121,7 +121,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['organization'])) {
     </div>
 
     <h2>Select Organization and Subject</h2>
-    <form id="selectForm" action="confirm.php" method="GET"> <!-- Updated action to confirm.php -->
+    <form id="selectForm" action="confirm.php" method="GET">
         <label for="organization">Organization:</label>
         <select name="organization" id="organization" required>
             <option value="" disabled selected>Select Organization</option>
@@ -135,7 +135,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['organization'])) {
             <option value="" disabled selected>Select Subject</option>
         </select>
         
-        <button type="submit" class="btn">Confirm Selection</button>
+        <button type="submit" class="btn">Start Exam</button>
     </form>
 </div>
 
@@ -155,6 +155,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['organization'])) {
                     subjectSelect.append(new Option("No subjects for this organization", ""));
                 }
             });
+        });
+
+        $("#selectForm").submit(function(e) {
+            var organization = $("#organization").val();
+            var subject = $("#subject").val();
+            if (!organization || !subject) {
+                e.preventDefault();
+                alert("Please select both organization and subject.");
+            }
         });
     });
 </script>
